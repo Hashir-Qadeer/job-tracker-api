@@ -3,6 +3,8 @@ from sqlalchemy.orm import Session
 from app.services import nlp_service
 from app.models.job import Job, JobStatus
 from app.schemas.job import JobCreate, JobUpdate
+from app.core.exceptions import JobNotFoundException
+
 
 def create_job(db: Session, job: JobCreate, user_id: int) -> Job:
     db_job = Job(**job.model_dump(), user_id=user_id)
@@ -14,13 +16,14 @@ def create_job(db: Session, job: JobCreate, user_id: int) -> Job:
     return db_job
 
 
-def get_job(db: Session, job_id: int) -> Job | None:
-    stmt = select(Job).where(
-        Job.id == job_id,
-        Job.is_deleted == False
-    )
-    return db.scalars(stmt).first()
+# job_service.py
 
+def get_job(db: Session, job_id: int) -> Job:
+    stmt = select(Job).where(Job.id == job_id, Job.is_deleted == False)
+    job = db.scalars(stmt).first()
+    if not job:
+        raise JobNotFoundException(job_id)
+    return job
 
 def get_jobs(
     db: Session,
@@ -50,10 +53,8 @@ def get_jobs(
     return jobs, total
 
 
-def update_job(db: Session, job_id: int, job_update: JobUpdate) -> Job | None:
-    db_job = get_job(db, job_id)
-    if not db_job:
-        return None
+def update_job(db: Session, job_id: int, job_update: JobUpdate) -> Job:
+    db_job = get_job(db, job_id)  # raises JobNotFoundException if missing
 
     update_data = job_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -64,11 +65,7 @@ def update_job(db: Session, job_id: int, job_update: JobUpdate) -> Job | None:
     return db_job
 
 
-def delete_job(db: Session, job_id: int) -> bool:
-    db_job = get_job(db, job_id)
-    if not db_job:
-        return False
-
+def delete_job(db: Session, job_id: int) -> None:
+    db_job = get_job(db, job_id)  # raises JobNotFoundException if missing
     db_job.is_deleted = True
     db.commit()
-    return True
