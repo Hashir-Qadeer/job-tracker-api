@@ -11,6 +11,19 @@ from app.core.exceptions import (
     InvalidCredentialsException
 )
 
+from app.core.limiter import limiter
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+from fastapi import Depends
+
+from app.database import get_db
+
+from app.core.limiter import limiter
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -60,3 +73,31 @@ def invalid_credentials_handler(request: Request, exc: InvalidCredentialsExcepti
 @app.get("/")
 def root():
     return {"message": "Job Tracker API"}
+
+
+
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+start_time = time.time()
+
+@app.get("/health")
+def health_check(db: Session = Depends(get_db)):
+    try:
+        db.execute(select(1))
+        db_status = "ok"
+    except Exception:
+        db_status = "error"
+    return {
+        "status": "ok",
+        "db_status": db_status,
+        "uptime_seconds": round(time.time() - start_time, 2),
+        "version": "1.0.0",
+    }
+
+
+
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
