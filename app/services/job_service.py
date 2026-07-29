@@ -1,12 +1,13 @@
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
-
+from app.services import nlp_service
 from app.models.job import Job, JobStatus
 from app.schemas.job import JobCreate, JobUpdate
 
-
 def create_job(db: Session, job: JobCreate, user_id: int) -> Job:
     db_job = Job(**job.model_dump(), user_id=user_id)
+    if db_job.resume_text and db_job.description:
+        db_job.match_score = nlp_service.compute_match_score(db_job.resume_text, db_job.description)
     db.add(db_job)
     db.commit()
     db.refresh(db_job)

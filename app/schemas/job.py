@@ -1,9 +1,8 @@
 from pydantic import BaseModel
 from pydantic import ConfigDict
 from datetime import datetime
-from typing import Optional
 from app.models.job import JobStatus
-
+from typing import Optional, List
 
 class JobCreate(BaseModel):
     title: str
@@ -43,3 +42,12 @@ class JobResponse(BaseModel):
 class JobList(BaseModel):
     jobs: list[JobResponse]
     total: int
+
+
+
+class ScoreRequest(BaseModel):
+    resume_text: str
+
+class ScoreResponse(BaseModel):
+    match_score: float
+    missing_keywords: List[str]    

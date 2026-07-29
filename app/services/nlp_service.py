@@ -1,0 +1,31 @@
+import spacy
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
+nlp = spacy.load("en_core_web_sm")
+
+
+def compute_match_score(resume: str, job_desc: str) -> float:
+    if not resume.strip() or not job_desc.strip():
+        return 0.0
+    vectorizer = TfidfVectorizer(stop_words="english")
+    tfidf = vectorizer.fit_transform([resume, job_desc])
+    score = cosine_similarity(tfidf[0:1], tfidf[1:2])[0][0]
+    return round(float(score) * 100, 2)
+
+
+def extract_missing_keywords(resume: str, job_desc: str) -> list[str]:
+    resume_doc = nlp(resume)      # no .lower() here
+    job_doc = nlp(job_desc)       # no .lower() here
+
+    resume_tokens = {
+        token.lemma_.lower() for token in resume_doc
+        if token.pos_ in ("NOUN", "PROPN") and not token.is_stop and not token.is_punct
+    }
+    job_tokens = {
+        token.lemma_.lower() for token in job_doc
+        if token.pos_ in ("NOUN", "PROPN") and not token.is_stop and not token.is_punct
+    }
+
+    missing = job_tokens - resume_tokens
+    return sorted(missing)

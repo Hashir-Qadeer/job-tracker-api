@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from sqlalchemy.orm import Session
-
 from app.database import get_db
 from app.schemas.job import JobCreate, JobUpdate, JobResponse, JobList
 from app.models.job import JobStatus
 from app.services import job_service
 from app.core.security import get_current_user
 from app.models.user import User
+from app.schemas.job import ScoreRequest, ScoreResponse
+from app.services import nlp_service
 
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -61,3 +62,26 @@ def delete_job(job_id: int, db: Session = Depends(get_db),current_user: User = D
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Job with id {job_id} not found"
         )
+
+
+
+
+@router.post("/{job_id}/score", response_model=ScoreResponse)
+def score_job(
+    job_id: int,
+    score_data: ScoreRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    job = job_service.get_job(db, job_id)
+    if not job or job.user_id != current_user.id:
+        raise HTTPException(404, "Job not found")
+
+    match_score = nlp_service.compute_match_score(score_data.resume_text, job.description or "")
+    missing = nlp_service.extract_missing_keywords(score_data.resume_text, job.description or "")
+
+    job.match_score = match_score
+    job.resume_text = score_data.resume_text
+    db.commit()
+
+    return {"match_score": match_score, "missing_keywords": missing}
