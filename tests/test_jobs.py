@@ -1,3 +1,4 @@
+import time
 def test_create_job(client, auth_headers):
     resp = client.post("/jobs/", json={"title": "Dev", "company": "Acme"}, headers=auth_headers)
     assert resp.status_code == 201
@@ -26,3 +27,19 @@ def test_delete_job(client, auth_headers):
     created = client.post("/jobs/", json={"title": "Dev", "company": "Acme"}, headers=auth_headers).json()
     resp = client.delete(f"/jobs/{created['id']}", headers=auth_headers)
     assert resp.status_code == 204
+
+
+
+def test_create_job_is_fast(client, auth_headers):
+    start = time.time()
+    resp = client.post("/jobs/", json={
+        "title": "Backend Dev",
+        "company": "TechCorp",
+        "description": "Python FastAPI Docker developer needed",
+        "resume_text": "Experienced Python FastAPI developer"
+    }, headers=auth_headers)
+    duration = (time.time() - start) * 1000  # ms
+
+    assert resp.status_code == 201
+    assert resp.json()["match_score"] is None  # not scored yet
+    assert duration < 100  # should respond fast, scoring happens in background    

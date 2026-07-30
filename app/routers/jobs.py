@@ -1,21 +1,36 @@
 from fastapi import APIRouter, Depends, status, Request
 from sqlalchemy.orm import Session
-
+import asyncio
+from sqlalchemy import select
 from app.database import get_db
 from app.schemas.job import JobCreate, JobUpdate, JobResponse, JobList
 from app.models.job import JobStatus
-from app.services import job_service
+from app.services import job_service, nlp_service
 from app.core.security import get_current_user
 from app.core.limiter import limiter
 from app.models.user import User
+from fastapi import BackgroundTasks
+from app.models.job import Job
+from app.services.job_service import check_job_staleness
+
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
-@router.post("/", response_model=JobResponse, status_code=status.HTTP_201_CREATED)
+
+@router.post("/", response_model=JobResponse, status_code=201)
 @limiter.limit("60/minute")
-def create_job(request: Request, job: JobCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return job_service.create_job(db=db, job=job, user_id=current_user.id)
+def create_job(
+    request: Request,
+    job: JobCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    new_job = job_service.create_job(db, job, current_user.id)
+    if job.resume_text and job.description:
+        background_tasks.add_task(nlp_service.score_and_save, db, new_job.id)
+    return new_job
 
 
 @router.get("/", response_model=JobList)
@@ -35,6 +50,22 @@ def get_jobs(
     )
     return JobList(jobs=jobs, total=total)
 
+@router.get("/stale")
+async def get_stale_jobs(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Check all of the user's jobs concurrently and flag stale ones
+    (applied 30+ days ago with no status update).
+    """
+    stmt = select(Job).where(Job.user_id == current_user.id, Job.is_deleted == False)
+    jobs = db.scalars(stmt).all()
+
+    results = await asyncio.gather(*[check_job_staleness(job) for job in jobs])
+
+    stale_jobs = [r for r in results if r is not None]
+    return {"stale_jobs": stale_jobs, "count": len(stale_jobs)}
 
 @router.get("/{job_id}", response_model=JobResponse)
 @limiter.limit("60/minute")
@@ -52,3 +83,6 @@ def update_job(request: Request, job_id: int, job: JobUpdate, db: Session = Depe
 @limiter.limit("60/minute")
 def delete_job(request: Request, job_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     job_service.delete_job(db=db, job_id=job_id)
+
+
+

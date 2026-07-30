@@ -4,12 +4,26 @@ from app.services import nlp_service
 from app.models.job import Job, JobStatus
 from app.schemas.job import JobCreate, JobUpdate
 from app.core.exceptions import JobNotFoundException
+import logging
+import asyncio
+from datetime import datetime, timedelta
 
+logger = logging.getLogger("job-tracker")
 
 def create_job(db: Session, job: JobCreate, user_id: int) -> Job:
+    """
+    Create a new job application record.
+
+    Args:
+        db: Active database session.
+        job: The job data to create.
+        user_id: The ID of the user creating this job.
+
+    Returns:
+        The newly created Job object (match_score will be None if
+        scoring hasn't run yet — see background task in the router).
+    """
     db_job = Job(**job.model_dump(), user_id=user_id)
-    if db_job.resume_text and db_job.description:
-        db_job.match_score = nlp_service.compute_match_score(db_job.resume_text, db_job.description)
     db.add(db_job)
     db.commit()
     db.refresh(db_job)
@@ -53,15 +67,20 @@ def get_jobs(
     return jobs, total
 
 
-def update_job(db: Session, job_id: int, job_update: JobUpdate) -> Job:
-    db_job = get_job(db, job_id)  # raises JobNotFoundException if missing
 
+
+def update_job(db: Session, job_id: int, job_update: JobUpdate) -> Job:
+    db_job = get_job(db, job_id)
+    old_status = db_job.status
     update_data = job_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(db_job, field, value)
-
     db.commit()
     db.refresh(db_job)
+
+    if job_update.status and job_update.status != old_status and job_update.status in (JobStatus.offer, JobStatus.rejected):
+        logger.info(f"NOTIFICATION: '{db_job.title}' at '{db_job.company}' status changed to {job_update.status.value}")
+
     return db_job
 
 
@@ -69,3 +88,29 @@ def delete_job(db: Session, job_id: int) -> None:
     db_job = get_job(db, job_id)  # raises JobNotFoundException if missing
     db_job.is_deleted = True
     db.commit()
+
+
+
+async def check_job_staleness(job: Job) -> dict | None:
+    """
+    Check if a single job is stale (applied 30+ days ago, no status change).
+
+    Args:
+        job: The Job object to check.
+
+    Returns:
+        A dict with job details if stale, otherwise None.
+    """
+    if not job.applied_date:
+        return None
+
+    days_since_applied = (datetime.utcnow() - job.applied_date.replace(tzinfo=None)).days
+
+    if days_since_applied >= 30 and job.status == JobStatus.applied:
+        return {
+            "id": job.id,
+            "title": job.title,
+            "company": job.company,
+            "days_since_applied": days_since_applied
+        }
+    return None
