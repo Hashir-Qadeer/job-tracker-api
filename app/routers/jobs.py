@@ -1,21 +1,18 @@
-from fastapi import APIRouter, Depends, status, Request
+from fastapi import APIRouter, Depends, status, Request, HTTPException, Response, BackgroundTasks
 from sqlalchemy.orm import Session
-import asyncio
 from sqlalchemy import select
+import asyncio
+
 from app.database import get_db
-from app.schemas.job import JobCreate, JobUpdate, JobResponse, JobList
-from app.models.job import JobStatus
+from app.schemas.job import JobCreate, JobUpdate, JobResponse, JobList, ScoreRequest, ScoreResponse
+from app.models.job import Job, JobStatus
+from app.models.user import User
 from app.services import job_service, nlp_service
+from app.services.job_service import check_job_staleness
 from app.core.security import get_current_user
 from app.core.limiter import limiter
-from app.models.user import User
-from fastapi import BackgroundTasks
-from app.models.job import Job
-from app.services.job_service import check_job_staleness
-
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
-
 
 
 @router.post("/", response_model=JobResponse, status_code=201)
@@ -50,6 +47,7 @@ def get_jobs(
     )
     return JobList(jobs=jobs, total=total)
 
+
 @router.get("/stale")
 async def get_stale_jobs(
     db: Session = Depends(get_db),
@@ -67,22 +65,57 @@ async def get_stale_jobs(
     stale_jobs = [r for r in results if r is not None]
     return {"stale_jobs": stale_jobs, "count": len(stale_jobs)}
 
+
 @router.get("/{job_id}", response_model=JobResponse)
 @limiter.limit("60/minute")
-def get_job(request: Request, job_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return job_service.get_job(db=db, job_id=job_id)
+def get_job(
+    request: Request,
+    job_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    return job_service.get_job(db=db, job_id=job_id, user_id=current_user.id)
 
 
 @router.put("/{job_id}", response_model=JobResponse)
 @limiter.limit("60/minute")
-def update_job(request: Request, job_id: int, job: JobUpdate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return job_service.update_job(db=db, job_id=job_id, job_update=job)
+def update_job(
+    request: Request,
+    job_id: int,
+    job: JobUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    return job_service.update_job(db=db, job_id=job_id, job_update=job, user_id=current_user.id)
 
 
 @router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
 @limiter.limit("60/minute")
-def delete_job(request: Request, job_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    job_service.delete_job(db=db, job_id=job_id)
+def delete_job(
+    request: Request,
+    job_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    job_service.delete_job(db=db, job_id=job_id, user_id=current_user.id)
 
 
+@router.post("/{job_id}/score", response_model=ScoreResponse)
+def score_job(
+    job_id: int,
+    score_data: ScoreRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    job = job_service.get_job(db, job_id, current_user.id)
 
+    match_score, was_hit = nlp_service.get_cached_score(score_data.resume_text, job.description or "")
+    missing = nlp_service.extract_missing_keywords(score_data.resume_text, job.description or "")
+
+    job.match_score = match_score
+    job.resume_text = score_data.resume_text
+    db.commit()
+
+    response.headers["X-Cache"] = "HIT" if was_hit else "MISS"
+    return {"match_score": match_score, "missing_keywords": missing}

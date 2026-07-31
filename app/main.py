@@ -1,7 +1,10 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.responses import JSONResponse
 import logging
 import time
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.routers import jobs, auth, analytics
 from app.core.exceptions import (
@@ -10,19 +13,10 @@ from app.core.exceptions import (
     DuplicateEmailException,
     InvalidCredentialsException
 )
-
 from app.core.limiter import limiter
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-from fastapi import Depends
-
 from app.database import get_db
-
-from app.core.limiter import limiter
-from slowapi import _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,6 +29,9 @@ app = FastAPI(title="Job Tracker API")
 app.include_router(auth.router)
 app.include_router(jobs.router)
 app.include_router(analytics.router)
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 @app.middleware("http")
@@ -75,11 +72,6 @@ def root():
     return {"message": "Job Tracker API"}
 
 
-
-
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
 start_time = time.time()
 
 @app.get("/health")
@@ -95,9 +87,3 @@ def health_check(db: Session = Depends(get_db)):
         "uptime_seconds": round(time.time() - start_time, 2),
         "version": "1.0.0",
     }
-
-
-
-
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)

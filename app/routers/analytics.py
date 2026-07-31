@@ -1,11 +1,13 @@
+import json
 import pandas as pd
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from app.database import get_db
 from app.models.job import Job
 from app.core.security import get_current_user
 from app.models.user import User
+from app.core.cache import redis_client
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -27,9 +29,19 @@ def _jobs_dataframe(db: Session, user_id: int) -> pd.DataFrame:
     return pd.DataFrame(data)
 
 
-@router.get("/summary")
-def summary(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    df = _jobs_dataframe(db, current_user.id)
+def cached_or_compute(cache_key: str, response: Response, compute_fn):
+    cached = redis_client.get(cache_key)
+    if cached:
+        response.headers["X-Cache"] = "HIT"
+        return json.loads(cached)
+    result = compute_fn()
+    redis_client.setex(cache_key, 300, json.dumps(result, default=str))  # 5 min TTL
+    response.headers["X-Cache"] = "MISS"
+    return result
+
+
+def _compute_summary(db: Session, user_id: int):
+    df = _jobs_dataframe(db, user_id)
     if df.empty:
         return {"total_applications": 0, "by_status": {}, "avg_match_score": 0}
     return {
@@ -39,9 +51,8 @@ def summary(db: Session = Depends(get_db), current_user: User = Depends(get_curr
     }
 
 
-@router.get("/funnel")
-def funnel(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    df = _jobs_dataframe(db, current_user.id)
+def _compute_funnel(db: Session, user_id: int):
+    df = _jobs_dataframe(db, user_id)
     if df.empty:
         return {"applied": 0, "interview": 0, "offer": 0, "conversion_to_interview": 0, "conversion_to_offer": 0}
     counts = df["status"].value_counts()
@@ -57,20 +68,38 @@ def funnel(db: Session = Depends(get_db), current_user: User = Depends(get_curre
     }
 
 
-@router.get("/top-matches")
-def top_matches(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    df = _jobs_dataframe(db, current_user.id)
+def _compute_top_matches(db: Session, user_id: int):
+    df = _jobs_dataframe(db, user_id)
     if df.empty or df["match_score"].isna().all():
         return {"top_matches": []}
     top = df.dropna(subset=["match_score"]).sort_values("match_score", ascending=False).head(5)
     return {"top_matches": top.to_dict(orient="records")}
 
 
-@router.get("/timeline")
-def timeline(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    df = _jobs_dataframe(db, current_user.id)
+def _compute_timeline(db: Session, user_id: int):
+    df = _jobs_dataframe(db, user_id)
     if df.empty or df["applied_date"].isna().all():
         return {"timeline": []}
     df["applied_date"] = pd.to_datetime(df["applied_date"])
     weekly = df.groupby(pd.Grouper(key="applied_date", freq="W")).size()
     return {"timeline": [{"week": str(k.date()), "count": int(v)} for k, v in weekly.items()]}
+
+
+@router.get("/summary")
+def summary(response: Response, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return cached_or_compute(f"analytics:summary:{current_user.id}", response, lambda: _compute_summary(db, current_user.id))
+
+
+@router.get("/funnel")
+def funnel(response: Response, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return cached_or_compute(f"analytics:funnel:{current_user.id}", response, lambda: _compute_funnel(db, current_user.id))
+
+
+@router.get("/top-matches")
+def top_matches(response: Response, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return cached_or_compute(f"analytics:top-matches:{current_user.id}", response, lambda: _compute_top_matches(db, current_user.id))
+
+
+@router.get("/timeline")
+def timeline(response: Response, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return cached_or_compute(f"analytics:timeline:{current_user.id}", response, lambda: _compute_timeline(db, current_user.id))

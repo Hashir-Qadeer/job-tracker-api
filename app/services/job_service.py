@@ -4,11 +4,17 @@ from app.services import nlp_service
 from app.models.job import Job, JobStatus
 from app.schemas.job import JobCreate, JobUpdate
 from app.core.exceptions import JobNotFoundException
+from app.core.cache import redis_client
 import logging
-import asyncio
-from datetime import datetime, timedelta
+from datetime import date
 
 logger = logging.getLogger("job-tracker")
+
+
+def _invalidate_analytics_cache(user_id: int):
+    for pattern in ["summary", "funnel", "top-matches", "timeline"]:
+        redis_client.delete(f"analytics:{pattern}:{user_id}")
+
 
 def create_job(db: Session, job: JobCreate, user_id: int) -> Job:
     """
@@ -27,17 +33,17 @@ def create_job(db: Session, job: JobCreate, user_id: int) -> Job:
     db.add(db_job)
     db.commit()
     db.refresh(db_job)
+    _invalidate_analytics_cache(user_id)
     return db_job
 
 
-# job_service.py
-
-def get_job(db: Session, job_id: int) -> Job:
-    stmt = select(Job).where(Job.id == job_id, Job.is_deleted == False)
+def get_job(db: Session, job_id: int, user_id: int) -> Job:
+    stmt = select(Job).where(Job.id == job_id, Job.user_id == user_id, Job.is_deleted == False)
     job = db.scalars(stmt).first()
     if not job:
         raise JobNotFoundException(job_id)
     return job
+
 
 def get_jobs(
     db: Session,
@@ -67,16 +73,15 @@ def get_jobs(
     return jobs, total
 
 
-
-
-def update_job(db: Session, job_id: int, job_update: JobUpdate) -> Job:
-    db_job = get_job(db, job_id)
+def update_job(db: Session, job_id: int, job_update: JobUpdate, user_id: int) -> Job:
+    db_job = get_job(db, job_id, user_id)
     old_status = db_job.status
     update_data = job_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(db_job, field, value)
     db.commit()
     db.refresh(db_job)
+    _invalidate_analytics_cache(user_id)
 
     if job_update.status and job_update.status != old_status and job_update.status in (JobStatus.offer, JobStatus.rejected):
         logger.info(f"NOTIFICATION: '{db_job.title}' at '{db_job.company}' status changed to {job_update.status.value}")
@@ -84,11 +89,11 @@ def update_job(db: Session, job_id: int, job_update: JobUpdate) -> Job:
     return db_job
 
 
-def delete_job(db: Session, job_id: int) -> None:
-    db_job = get_job(db, job_id)  # raises JobNotFoundException if missing
+def delete_job(db: Session, job_id: int, user_id: int) -> None:
+    db_job = get_job(db, job_id, user_id)  # raises JobNotFoundException if missing
     db_job.is_deleted = True
     db.commit()
-
+    _invalidate_analytics_cache(user_id)
 
 
 async def check_job_staleness(job: Job) -> dict | None:
@@ -104,7 +109,7 @@ async def check_job_staleness(job: Job) -> dict | None:
     if not job.applied_date:
         return None
 
-    days_since_applied = (datetime.utcnow() - job.applied_date.replace(tzinfo=None)).days
+    days_since_applied = (date.today() - job.applied_date).days
 
     if days_since_applied >= 30 and job.status == JobStatus.applied:
         return {

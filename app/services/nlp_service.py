@@ -3,6 +3,10 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sqlalchemy.orm import Session
 from app.models.job import Job
+import hashlib
+import json
+from app.core.cache import redis_client
+from sqlalchemy import select
 nlp = spacy.load("en_core_web_sm")
 
 
@@ -31,18 +35,24 @@ def extract_missing_keywords(resume: str, job_desc: str) -> list[str]:
     missing = job_tokens - resume_tokens
     return sorted(missing)
 
-
-def score_and_save(db: Session, job_id: int) -> None:
-    """
-    Compute and persist the match score for a job in the background.
-
-    Args:
-        db: Active database session.
-        job_id: The ID of the job to score.
-    """
+def get_cached_score(resume: str, job_desc: str) -> tuple[float, bool]:
+    """Returns (score, was_cache_hit)."""
+    key = "score:" + hashlib.md5(f"{resume}{job_desc}".encode()).hexdigest()
+    cached = redis_client.get(key)
+    if cached:
+        return json.loads(cached), True
+    result = compute_match_score(resume, job_desc)
+    redis_client.setex(key, 86400, json.dumps(result))
+    return result, False  
+ 
+def score_and_save(db: Session, job_id: int):
     job = db.get(Job, job_id)
     if not job or not job.resume_text or not job.description:
         return
-
-    job.match_score = compute_match_score(job.resume_text, job.description)
+    score, _ = get_cached_score(job.resume_text, job.description)
+    job.match_score = score
     db.commit()
+
+
+ 
+
