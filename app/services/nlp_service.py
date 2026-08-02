@@ -42,7 +42,7 @@ def get_cached_score(resume: str, job_desc: str) -> tuple[float, bool]:
     if cached:
         return json.loads(cached), True
     result = compute_match_score(resume, job_desc)
-    redis_client.setex(key, 86400, json.dumps(result))
+    redis_client.set(key, json.dumps(result), ex=86400)
     return result, False  
  
 def score_and_save(db: Session, job_id: int):
