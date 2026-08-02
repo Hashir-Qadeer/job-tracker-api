@@ -1,12 +1,14 @@
+import hashlib
+import json
+
 import spacy
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sqlalchemy.orm import Session
-from app.models.job import Job
-import hashlib
-import json
+
 from app.core.cache import redis_client
-from sqlalchemy import select
+from app.models.job import Job
+
 nlp = spacy.load("en_core_web_sm")
 
 

@@ -1,16 +1,17 @@
-from fastapi import APIRouter, Depends, status, Request, HTTPException, Response, BackgroundTasks
-from sqlalchemy.orm import Session
-from sqlalchemy import select
 import asyncio
 
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response, status
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.core.limiter import limiter
+from app.core.security import get_current_user
 from app.database import get_db
-from app.schemas.job import JobCreate, JobUpdate, JobResponse, JobList, ScoreRequest, ScoreResponse
 from app.models.job import Job, JobStatus
 from app.models.user import User
+from app.schemas.job import JobCreate, JobList, JobResponse, JobUpdate, ScoreRequest, ScoreResponse
 from app.services import job_service, nlp_service
 from app.services.job_service import check_job_staleness
-from app.core.security import get_current_user
-from app.core.limiter import limiter
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -57,7 +58,7 @@ async def get_stale_jobs(
     Check all of the user's jobs concurrently and flag stale ones
     (applied 30+ days ago with no status update).
     """
-    stmt = select(Job).where(Job.user_id == current_user.id, Job.is_deleted == False)
+    stmt = select(Job).where(Job.user_id == current_user.id, Job.is_deleted.is_(False))
     jobs = db.scalars(stmt).all()
 
     results = await asyncio.gather(*[check_job_staleness(job) for job in jobs])

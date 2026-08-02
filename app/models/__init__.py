@@ -1,3 +1,3 @@
-from app.models.user import User
-from app.models.job import Job
-from app.database import Base
+from app.database import Base as Base
+from app.models.job import Job as Job
+from app.models.user import User as User

@@ -1,8 +1,10 @@
-from pydantic import BaseModel
-from pydantic import ConfigDict
 from datetime import datetime
+from typing import List
+
+from pydantic import BaseModel, ConfigDict
+
 from app.models.job import JobStatus
-from typing import Optional, List
+
 
 class JobCreate(BaseModel):
     title: str

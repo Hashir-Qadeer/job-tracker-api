@@ -1,0 +1,31 @@
+name: CI Pipeline
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:alpine
+        ports: ['6379:6379']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Install deps
+        run: |
+          pip install -r requirements.txt
+          python -m spacy download en_core_web_sm
+      - name: Lint with Ruff
+        run: ruff check app/
+      - name: Run tests
+        run: pytest --cov=app tests/ --cov-report=xml
+        env:
+          SECRET_KEY: test-secret-key
+          ALGORITHM: HS256
+          ACCESS_TOKEN_EXPIRE_MINUTES: 30
+          DATABASE_URL: sqlite:///./test.db
+          REDIS_URL: redis://localhost:6379
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4

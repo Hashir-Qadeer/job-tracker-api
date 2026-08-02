@@ -1,12 +1,14 @@
+import os
 from datetime import datetime, timedelta
-from fastapi import Depends,HTTPException
-from sqlalchemy.orm import Session
+
+from dotenv import load_dotenv
+from fastapi import Depends, HTTPException
+from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-import os
-from dotenv import load_dotenv
-from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
+from sqlalchemy.orm import Session
+
 from app.database import get_db
 from app.models.user import User
 

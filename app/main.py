@@ -1,22 +1,22 @@
-from fastapi import FastAPI, Request, Depends
-from fastapi.responses import JSONResponse
 import logging
 import time
 
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.routers import jobs, auth, analytics
 from app.core.exceptions import (
+    DuplicateEmailException,
+    InvalidCredentialsException,
     JobNotFoundException,
     UnauthorizedException,
-    DuplicateEmailException,
-    InvalidCredentialsException
 )
 from app.core.limiter import limiter
-from slowapi import _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
 from app.database import get_db
+from app.routers import analytics, auth, jobs
 
 logging.basicConfig(
     level=logging.INFO,

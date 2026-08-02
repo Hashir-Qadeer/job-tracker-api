@@ -1,10 +1,12 @@
 
-from sqlalchemy import Column, Integer, String, Text, Float, DateTime, ForeignKey, Enum, Boolean
+import enum
+
+from sqlalchemy import Boolean, Column, DateTime, Enum, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
-from app.database import Base
 from sqlalchemy.sql import func
 
-import enum
+from app.database import Base
+
 
 class JobStatus(enum.Enum):
     applied = "applied"

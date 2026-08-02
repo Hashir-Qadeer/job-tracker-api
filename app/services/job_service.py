@@ -1,12 +1,13 @@
-from sqlalchemy import select, func
-from sqlalchemy.orm import Session
-from app.services import nlp_service
-from app.models.job import Job, JobStatus
-from app.schemas.job import JobCreate, JobUpdate
-from app.core.exceptions import JobNotFoundException
-from app.core.cache import redis_client
 import logging
 from datetime import date
+
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from app.core.cache import redis_client
+from app.core.exceptions import JobNotFoundException
+from app.models.job import Job, JobStatus
+from app.schemas.job import JobCreate, JobUpdate
 
 logger = logging.getLogger("job-tracker")
 
@@ -38,7 +39,7 @@ def create_job(db: Session, job: JobCreate, user_id: int) -> Job:
 
 
 def get_job(db: Session, job_id: int, user_id: int) -> Job:
-    stmt = select(Job).where(Job.id == job_id, Job.user_id == user_id, Job.is_deleted == False)
+    stmt = select(Job).where(Job.id == job_id, Job.user_id == user_id, Job.is_deleted.is_(False))
     job = db.scalars(stmt).first()
     if not job:
         raise JobNotFoundException(job_id)
@@ -54,7 +55,7 @@ def get_jobs(
     limit: int = 10
 ) -> tuple[list[Job], int]:
     stmt = select(Job).where(
-        Job.is_deleted == False,
+        Job.is_deleted.is_(False),
         Job.user_id == user_id
     )
 

@@ -1,19 +1,21 @@
 import json
+
 import pandas as pd
 from fastapi import APIRouter, Depends, Response
-from sqlalchemy.orm import Session
 from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.core.cache import redis_client
+from app.core.security import get_current_user
 from app.database import get_db
 from app.models.job import Job
-from app.core.security import get_current_user
 from app.models.user import User
-from app.core.cache import redis_client
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 
 def _jobs_dataframe(db: Session, user_id: int) -> pd.DataFrame:
-    stmt = select(Job).where(Job.user_id == user_id, Job.is_deleted == False)
+    stmt = select(Job).where(Job.user_id == user_id, Job.is_deleted.is_(False))
     jobs = db.scalars(stmt).all()
     data = [
         {
