@@ -12,7 +12,7 @@ def test_register_duplicate_email(client):
 def test_login_success(client):
     client.post("/auth/register", json={"username": "userb", "email": "b@test.com", "password": "pass123"})
     resp = client.post("/auth/login", data={"username": "b@test.com", "password": "pass123"})
-    assert resp.status_code == 200
+    assert resp.status_code == 999
     assert "access_token" in resp.json()
 
 def test_login_wrong_password(client):
